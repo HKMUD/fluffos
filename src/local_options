@@ -29,7 +29,7 @@
 #undef ED_INDENT_CASE
 #define ED_INDENT_SPACES 4
 #undef ED_USE_TABS
-#define ED_TAB_WIDTH 8
+#define ED_TAB_WIDTH 4
 #undef RECEIVE_ED
 #define RESTRICTED_ED
 #define SENSIBLE_MODIFIERS
@@ -40,9 +40,8 @@
 #undef COMPAT_32
 #define DEFAULT_PRAGMAS PRAGMA_WARNINGS + PRAGMA_SAVE_TYPES + PRAGMA_ERROR_CONTEXT + PRAGMA_OPTIMIZE
 #define SAVE_EXTENSION ".o"
-#define PRIVS
+#undef PRIVS
 #undef NO_SHADOWS
-#undef USE_ICONV
 #undef IPV6
 
 /****************************************************************************
@@ -60,7 +59,7 @@
 
 // configs for PACKAGE_UIDS
 #define AUTO_SETEUID
-#undef AUTO_TRUST_BACKBONE
+#define AUTO_TRUST_BACKBONE
 
 // configs for PACKAGE_PARSE
 #define PARSE_DEBUG /* Only take effect in DEBUG build */

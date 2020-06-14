@@ -11,6 +11,7 @@
  * Most of these options will probably be of no interest to many users.  *
  *************************************************************************/
 
+#define CFG_MAX_LOCAL_VARIABLES 100
 /* You may optionally choose one (or none) of these malloc wrappers.  These
  * can be used in conjunction with any of the above malloc packages.
  *
@@ -48,7 +49,7 @@
  *
  * A side effect is that 'array' cannot be a variable or function name.
  */
-#undef ARRAY_RESERVED_WORD
+#define ARRAY_RESERVED_WORD
 
 /* REF_RESERVED_WORD: If this is defined then the word 'ref' can be
  *   used to pass arguments to functions by value.  Example:
