@@ -26,7 +26,7 @@
 #include <openssl/md4.h>
 #endif
 #ifndef OPENSSL_NO_MDC2
-#include <openssl/mdc2.h>
+//#include <openssl/mdc2.h>
 #endif
 #ifndef OPENSSL_NO_RIPEMD160
 #include <openssl/ripemd.h>
@@ -92,7 +92,7 @@ void f_hash(void) {
 #endif
 
 #ifndef OPENSSL_NO_MDC2
-  DO_HASH_IF("mdc2", MDC2, MDC2_DIGEST_LENGTH);
+//  DO_HASH_IF("mdc2", MDC2, MDC2_DIGEST_LENGTH);
 #endif
 
 #ifndef OPENSSL_NO_RIPEMD160
