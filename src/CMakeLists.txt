@@ -32,7 +32,7 @@ option(PACKAGE_SHA1 "sha1 package" ON)
 option(PACKAGE_SOCKETS "sockets package" ON)
 option(PACKAGE_TRIM "trim package" ON)
 option(PACKAGE_UIDS "uids package" ON)
-option(DEBUG OFF)
+option(DEBUG ON)
 option(DEBUGMALLOC ${DEBUG})
 # End of list of compile options.
 
