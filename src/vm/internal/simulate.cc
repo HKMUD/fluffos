@@ -9,8 +9,13 @@
 #include <unistd.h>    // for open()
 #ifdef HAVE_SIGNAL_H
 #include <signal.h>  // for signal*
-#include <base/internal/tracing.h>
+#include <net/telnet.h>
 #endif
+#ifdef _WIN32
+#include <winsock.h>  // for WSACleanup()
+#endif
+
+#include "base/internal/tracing.h"
 
 #include "applies_table.autogen.h"
 #include "backend.h"      // for clear_tick_events , FIXME
@@ -47,7 +52,6 @@ void db_cleanup(void);  // FIXME
 #include "comm.h"  // FIXME
 
 #include "vm/internal/trace.h"  // for dump_trace && get_svalue_trace
-
 /*
  * This one is called from HUP.
  */
@@ -89,6 +93,10 @@ void shutdownMudOS(int exit_code) {
   monitor(0, 0, 0, 0, 0); /* cause gmon.out to be written */
 #endif
   Tracer::collect();
+
+#ifdef _WIN32
+  WSACleanup();
+#endif
 
   exit(exit_code);
 }
@@ -305,7 +313,7 @@ static object_t *load_virtual_object(const char *name, int clone) {
        * allow this.  Destruct the new object and raise an error.
        */
       destruct_object(new_ob);
-      error("Virtual object name duplicates an existing object name.\n");
+      error("Virtual object name duplicates an existing object name: '%s'.\n", name);
     }
     /* Make sure O_CLONE is NOT set */
     new_ob->flags &= ~O_CLONE;
@@ -346,6 +354,7 @@ static object_t *load_virtual_object(const char *name, int clone) {
   /* reassign uid */
   give_uid_to_object(new_ob);
 #endif
+  apply(APPLY_VIRTUAL_START, new_ob, 0, ORIGIN_DRIVER);
   return new_ob;
 }
 
@@ -407,7 +416,7 @@ int filename_to_obname(const char *src, char *dest, int size) {
  *
  */
 object_t *load_object(const char *lname, int callcreate) {
-  ScopedTracer _tracer("LPC Load Object", EventCategory::VM_LOAD_OBJECT, {lname});
+  ScopedTracer _tracer("LPC Load Object", EventCategory::VM_LOAD_OBJECT, json{lname});
 
   auto inherit_chain_size = CONFIG_INT(__INHERIT_CHAIN_SIZE__);
 
@@ -1321,6 +1330,13 @@ int input_to(svalue_t *fun, int flag, int num_arg, svalue_t *args) {
     }
     s->ob = current_object;
     add_ref(current_object, "input_to");
+
+    // need to send out our own GA
+    if (auto ip = command_giver->interactive) {
+      if (ip->telnet && (ip->iflags & USING_TELNET) && !(ip->iflags & SUPPRESS_GA)) {
+        telnet_send_ga(ip->telnet);
+      }
+    }
     return 1;
   }
   free_sentence(s);
@@ -1871,7 +1887,6 @@ void _error_handler(char *err) {
     catch_value.u.string = string_copy(err, "caught error");
 
     throw("error handler");
-    fatal("throw error failed");
   }
 
   if (num_error > 0) {
@@ -1880,8 +1895,8 @@ void _error_handler(char *err) {
     too_deep_error = max_eval_error = 0;
     if (current_error_context) {
       throw("error handler error");
-      fatal("throw error failed");
     }
+    fatal("Driver BUG: no error context.");
   }
 
   num_error++;
@@ -1926,7 +1941,7 @@ exit:
   if (current_error_context) {
     throw("error handler error2");
   }
-  throw("BUG: Impossible to get here.");
+  fatal("Driver BUG: no error context.");
 }
 
 [[noreturn]] void error_needs_free(char *s) {

@@ -62,6 +62,7 @@ int remove_call_out(int | void | string);
 int member_array(mixed, string | mixed *, void | int, void | int);
 int input_to(string | function, ...);
 int random(int);
+int secure_random(int);
 void defer(function);
 
 #ifndef NO_ENVIRONMENT
@@ -101,7 +102,7 @@ int restore_object(string, void | int);
 mixed save_object(string | int | void, void | int);
 string save_variable(mixed);
 mixed restore_variable(string);
-object *users();
+object* users();
 mixed *get_dir(string, int default: 0);
 int strsrch(string, string | int, int default: 0);
 #ifdef COMPAT_32
@@ -363,6 +364,8 @@ void act_mxp();
 void request_term_type();
 void start_request_term_type();
 void request_term_size(void | int);
+void telnet_nop();
+
 /* shutdown is at the end because it is only called once per boot cycle :) */
 void shutdown(void | int);
 // Get current LPC stacktrace
@@ -374,3 +377,6 @@ int strwidth(string);
 void trace_start(string, int default: 10);
 // stop to collect tracing data right away.
 void trace_end();
+
+// return highest resolution clock in nanoseconds
+int perf_counter_ns();

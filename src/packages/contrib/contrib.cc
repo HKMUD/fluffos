@@ -115,7 +115,7 @@ void f_remove_shadow(void) {
    when I added it (added function support, etc) -Beek */
 #ifdef F_QUERY_NOTIFY_FAIL
 void f_query_notify_fail(void) {
-  char *p;
+  const char *p;
 
   if (command_giver && command_giver->interactive) {
     if (command_giver->interactive->iflags & NOTIFY_FAIL_FUNC) {
@@ -534,7 +534,7 @@ void f_terminal_colour(void) {
   int curcolourlen;
   int colourstartlen = 0;
   const char *resetstr = nullptr;
-  char *resetstrname;
+  const char *resetstrname;
   int resetstrlen = 0;
   int num, i, j, k, col, start, space, *lens, maybe_at_end;
   int space_garbage = 0;
@@ -1605,7 +1605,7 @@ void f_replaceable(void) {
   object_t *obj;
   program_t *prog;
   int i, j, num, numignore, replaceable;
-  char **ignore;
+  const char **ignore;
 
   if (st_num_arg == 2) {
     obj = (sp - 1)->u.ob;
@@ -1620,7 +1620,7 @@ void f_replaceable(void) {
     if (st_num_arg == 2) {
       numignore = sp->u.arr->size;
       if (numignore) {
-        ignore = reinterpret_cast<char **>(
+        ignore = reinterpret_cast<const char **>(
             DCALLOC(numignore + 2, sizeof(char *), TAG_TEMPORARY, "replaceable"));
       } else {
         ignore = nullptr;
@@ -1637,7 +1637,8 @@ void f_replaceable(void) {
       numignore += 2;
     } else {
       numignore = 2;
-      ignore = reinterpret_cast<char **>(DCALLOC(2, sizeof(char *), TAG_TEMPORARY, "replaceable"));
+      ignore =
+          reinterpret_cast<const char **>(DCALLOC(2, sizeof(char *), TAG_TEMPORARY, "replaceable"));
       ignore[0] = findstring(APPLY_CREATE);
       ignore[1] = findstring(APPLY___INIT);
     }
@@ -1861,7 +1862,8 @@ void f_zonetime(void) {
   pop_stack();
 
   old_tz = set_timezone(timezone);
-  retv = ctime(&time_val);
+  char buf[256] = {};
+  retv = ctime_r(&time_val, buf);
   if (!retv) {
     reset_timezone(old_tz);
     error("bad argument to zonetime.");
@@ -1890,7 +1892,8 @@ void f_is_daylight_savings_time(void) {
   if (time_to_check < 0) {
     time_to_check = 0;
   }
-  t = localtime(&time_to_check);
+  struct tm res = {};
+  t = localtime_r(&time_to_check, &res);
   if (t) {
     push_number((t->tm_isdst) > 0);
   } else {

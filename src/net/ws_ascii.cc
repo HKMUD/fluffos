@@ -105,8 +105,6 @@ int ws_ascii_callback(struct lws *wsi, enum lws_callback_reasons reason, void *u
           base, -1, EV_TIMEOUT,
           [](evutil_socket_t fd, short what, void *arg) {
             auto user = reinterpret_cast<interactive_t *>(arg);
-            // Force returning to line start, no line-feed.
-            ws_ascii_send(user->lws, "\r", 1);
             on_user_logon(user);
           },
           (void *)ip, nullptr);
@@ -136,10 +134,15 @@ int ws_ascii_callback(struct lws *wsi, enum lws_callback_reasons reason, void *u
       static unsigned char buf[LWS_PRE + MAX_TEXT];
       auto numbytes = evbuffer_copyout(pss->buffer, &buf[LWS_PRE], sizeof(buf) - LWS_PRE);
       if (numbytes > 0) {
-        numbytes = u8_truncate(&buf[LWS_PRE], numbytes);
+        auto new_numbytes = u8_truncate(&buf[LWS_PRE], numbytes);
+        if (new_numbytes != numbytes) {
+          auto rest = new_numbytes - numbytes;
+          evbuffer_prepend(pss->buffer, &buf[LWS_PRE + new_numbytes], rest);
+          numbytes = new_numbytes;
+        }
 #ifdef DEBUG
         if (!u8_validate(&buf[LWS_PRE], numbytes)) {
-          char buf1[MAX_TEXT + 1];
+          char buf1[MAX_TEXT + 1] = {};
           strncpy(buf1, reinterpret_cast<const char *>(&buf[LWS_PRE]), numbytes);
           debug_message("Illegal UTF8 Websocket output string: %s.", buf1);
         }
@@ -170,8 +173,9 @@ int ws_ascii_callback(struct lws *wsi, enum lws_callback_reasons reason, void *u
       if (len <= 0) {
         break;
       }
-      // TODO: maybe need to handle fragment
-      if (!u8_validate((const uint8_t *)in, len)) {
+      // don't accept binary frame, we want client to always send valid utf8.
+      // lws handles the utf8 check for us.
+      if (lws_frame_is_binary(wsi)) {
         return -1;
       }
       auto ip = pss->user;

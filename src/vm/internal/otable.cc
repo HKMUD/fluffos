@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <sstream>
+#include <fmt/format.h>
 
 std::unique_ptr<ObjectTable> ObjectTable::instance_;
 
@@ -57,8 +58,8 @@ bool ObjectTable::remove(Key const& key) {
   objects_.erase(it1);
   // guaranteed to exist if object exists
   auto it2 = children_.find(basename(key));
-  auto it3 = find_if(it2->second.begin(), it2->second.end(),
-                     [&key](Value v) -> bool { return v->obname == key; });
+  auto it3 = std::find_if(it2->second.begin(), it2->second.end(),
+                          [&key](Value v) -> bool { return v->obname == key; });
   // guaranteed to be in list if basename(key) exists in children_
   it2->second.erase(it3);
   if (it2->second.size() == 0) {
@@ -72,21 +73,20 @@ bool ObjectTable::remove(Key const& key) {
 // TODO: remove dependency on outbuffer_t here
 int ObjectTable::showStatus(outbuffer_t* out, int verbose) {
   std::stringstream ss;
-
+  auto total = objects_.size() * sizeof(Value);
   switch (verbose) {
     case 1:
-      ss << "Object name hash table status:"
-         << "\n";
-      ss << "------------------------------"
-         << "\n";
+      ss << "Object name hash table status:\n";
+      ss << "------------------------------\n";
       ss << "Elements:        " << objects_.size() << "\n";
-      ss << "Memory(bytes):     " << objects_.size() * sizeof(Value) << "\n";
+      ss << "Memory(bytes):     " << total << "\n";
       ss << "Bucket count:    " << objects_.bucket_count() << "\n";
       ss << "Load factor:     " << objects_.load_factor() << "\n";
       break;
 
     case 0:
-      ss << "Memory used(bytes):     " << objects_.size() * sizeof(Value) << "\n";
+      ss << fmt::format(FMT_STRING("{:<20s} {:>8d} {:>8d}"), "oname htable", objects_.size(), total)
+         << "\n";
       break;
 
     default:

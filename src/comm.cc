@@ -83,7 +83,7 @@ void on_user_command(evutil_socket_t fd, short what, void *arg) {
   auto user = reinterpret_cast<interactive_t *>(arg);
 
   if (user == nullptr) {
-    fatal("on_user_command: user == NULL, Driver BUG.");
+    DEBUG_FATAL("on_user_command: user == NULL, Driver BUG.");
     return;
   }
 
@@ -117,7 +117,7 @@ void on_user_read(bufferevent *bev, void *arg) {
   auto user = reinterpret_cast<interactive_t *>(arg);
 
   if (user == nullptr) {
-    fatal("on_user_read: user == NULL, Driver BUG.");
+    DEBUG_FATAL("on_user_read: user == NULL, Driver BUG.");
     return;
   }
 
@@ -131,7 +131,7 @@ void on_user_read(bufferevent *bev, void *arg) {
 void on_user_write(bufferevent *bev, void *arg) {
   auto user = reinterpret_cast<interactive_t *>(arg);
   if (user == nullptr) {
-    fatal("on_user_write: user == NULL, Driver BUG.");
+    DEBUG_FATAL("on_user_write: user == NULL, Driver BUG.");
     return;
   }
   // nothing to do.
@@ -141,7 +141,7 @@ void on_user_events(bufferevent *bev, short events, void *arg) {
   auto user = reinterpret_cast<interactive_t *>(arg);
 
   if (user == nullptr) {
-    fatal("on_user_events: user == NULL, Driver BUG.");
+    DEBUG_FATAL("on_user_events: user == NULL, Driver BUG.");
     return;
   }
 
@@ -418,7 +418,7 @@ bool init_user_conn() {
       }
 
       if (bind(fd, res->ai_addr, res->ai_addrlen) == -1) {
-        debug_message("socket_create: bind error: %s.\n",
+        debug_message("init_user_conn: bind error: %s.\n",
                       evutil_socket_error_to_string(evutil_socket_geterror(fd)));
         evutil_closesocket(fd);
         evutil_freeaddrinfo(res);
@@ -674,20 +674,20 @@ void get_user_data(interactive_t *ip) {
       // Impossible, we don't handle it here.
       break;
     case PORT_TELNET:
-      text_space = MAX_TEXT - ip->text_end;
+      text_space = sizeof(ip->text) - ip->text_end;
 
       /* check if we need more space */
-      if (text_space < MAX_TEXT / 16) {
+      if (text_space < sizeof(ip->text) / 16) {
         if (ip->text_start > 0) {
           memmove(ip->text, ip->text + ip->text_start, ip->text_end - ip->text_start);
           text_space += ip->text_start;
           ip->text_end -= ip->text_start;
           ip->text_start = 0;
         }
-        if (text_space < MAX_TEXT / 16) {
+        if (text_space < sizeof(ip->text) / 16) {
           ip->iflags |= SKIP_COMMAND;
           ip->text_start = ip->text_end = 0;
-          text_space = MAX_TEXT;
+          text_space = sizeof(ip->text);
         }
       }
       break;
@@ -862,7 +862,7 @@ void on_user_websocket_received(interactive_t *ip, const char *data, size_t len)
     return;
   }
 
-  auto text_space = MAX_TEXT - ip->text_end;
+  auto text_space = sizeof(ip->text) - ip->text_end;
 
   /* check if we need more space */
   if (text_space < len) {
@@ -875,7 +875,7 @@ void on_user_websocket_received(interactive_t *ip, const char *data, size_t len)
     if (text_space < len) {
       ip->iflags |= SKIP_COMMAND;
       ip->text_start = ip->text_end = 0;
-      text_space = MAX_TEXT;
+      text_space = sizeof(ip->text);
     }
   }
 
@@ -939,7 +939,6 @@ int cmd_in_buf(interactive_t *ip) {
     return 1;
   }
 
-  /* search for a newline.  if found, we have a command */
   for (p = ip->text + ip->text_start; p < ip->text + ip->text_end; p++) {
     if (*p == '\r' || *p == '\n') {
       return 1;
@@ -975,7 +974,8 @@ static char *first_cmd_in_buf(interactive_t *ip) {
   }
 
   /* search for the newline */
-  while (ip->text[ip->text_start] != '\n' && ip->text[ip->text_start] != '\r') {
+  while (ip->text_start < ip->text_end && ip->text[ip->text_start] != '\n' &&
+         ip->text[ip->text_start] != '\r') {
     ip->text_start++;
   }
 
@@ -987,6 +987,7 @@ static char *first_cmd_in_buf(interactive_t *ip) {
   }
 
   ip->text[ip->text_start++] = 0;
+
   if (!cmd_in_buf(ip)) {
     ip->iflags &= ~CMD_IN_BUF;
   }
@@ -1073,10 +1074,9 @@ static void process_input(interactive_t *ip, char *user_command) {
 
 #ifndef NO_ADD_ACTION
   if (ret->type == T_STRING) {
-    static char buf[MAX_TEXT];
-
-    strncpy(buf, ret->u.string, MAX_TEXT - 1);
-    parse_command(buf, command_giver);
+    auto command = string_copy(ret->u.string, "current_command: " __CURRENT_FILE_LINE__);
+    DEFER { FREE_MSTR(command); };
+    parse_command(command, command_giver);
   } else {
     if (ret->type != T_NUMBER || !ret->u.number) {
       parse_command(user_command, command_giver);
@@ -1103,7 +1103,7 @@ int process_user_command(interactive_t *ip) {
   }
 
   if (ip != command_giver->interactive) {
-    fatal("BUG: process_user_command.");
+    DEBUG_FATAL("BUG: process_user_command.");
   }
 
   current_interactive = command_giver; /* this is yuck phooey, sigh */
@@ -1120,14 +1120,11 @@ int process_user_command(interactive_t *ip) {
     goto exit;
   }
 
-  if ((ip->iflags & USING_MXP) && user_command[0] == ' ' && user_command[1] == '[' &&
-      user_command[3] == 'z') {
-    svalue_t *ret;
-    copy_and_push_string(user_command);
-    set_eval(max_eval_cost);
-    ret = safe_apply(APPLY_MXP_TAG, ip->ob, 1, ORIGIN_DRIVER);
-    if (ret && ret->type == T_NUMBER && ret->u.number) {
-      goto exit;
+  if (ip->iflags & USING_MXP) {
+    if (user_command[0] == ' ' && user_command[1] == '[' && user_command[3] == 'z') {
+      if (!on_receive_mxp_tag(ip, user_command)) {
+        goto exit;
+      }
     }
   }
 
@@ -1295,7 +1292,7 @@ void remove_interactive(object_t *ob, int dested) {
 static int call_function_interactive(interactive_t *i, char *str) {
   object_t *ob;
   funptr_t *funp;
-  char *function;
+  const char *function;
   svalue_t *args;
   sentence_t *sent;
   int num_arg;
@@ -1425,16 +1422,17 @@ int set_call(object_t *ob, sentence_t *sent, int flags) {
   if (ob == nullptr || sent == nullptr) {
     return (0);
   }
-  if (ob->interactive == nullptr || ob->interactive->input_to) {
+  auto ip = ob->interactive;
+  if (ip == nullptr || ip->input_to) {
     return (0);
   }
-  ob->interactive->input_to = sent;
-  ob->interactive->iflags |= (flags & (I_NOECHO | I_NOESC | I_SINGLE_CHAR));
+  ip->input_to = sent;
+  ip->iflags |= (flags & (I_NOECHO | I_NOESC | I_SINGLE_CHAR));
   if (flags & I_NOECHO) {
-    set_localecho(ob->interactive, false);
+    set_localecho(ip, false);
   }
   if (flags & I_SINGLE_CHAR) {
-    set_charmode(ob->interactive);
+    set_charmode(ip);
   }
   return (1);
 } /* set_call() */
@@ -1450,37 +1448,34 @@ void set_prompt(const char *str) {
  * Print the prompt, but only if input_to not is disabled.
  */
 static void print_prompt(interactive_t *ip) {
-  object_t *ob = ip->ob;
+  if (!ip || !ip->ob || !IP_VALID(ip, ip->ob)) {
+    return;
+  }
 
 #if defined(F_INPUT_TO) || defined(F_GET_CHAR)
-  if (ip->input_to == nullptr) {
-#endif
-    /* give user object a chance to write its own prompt */
-    if (!(ip->iflags & HAS_WRITE_PROMPT)) {
-      tell_object(ip->ob, ip->prompt, strlen(ip->prompt));
-    }
-#ifdef OLD_ED
-    else if (ip->ed_buffer) {
-      tell_object(ip->ob, ip->prompt, strlen(ip->prompt));
-    }
-#endif
-    else if (!apply(APPLY_WRITE_PROMPT, ip->ob, 0, ORIGIN_DRIVER)) {
-      if (!IP_VALID(ip, ob)) {
-        return;
-      }
-      ip->iflags &= ~HAS_WRITE_PROMPT;
-      tell_object(ip->ob, ip->prompt, strlen(ip->prompt));
-    }
-#if defined(F_INPUT_TO) || defined(F_GET_CHAR)
+  if (ip->input_to != nullptr) {
+    // while in single char mode there won't e any prompt.
+    return;
   }
 #endif
-  if (!IP_VALID(ip, ob)) {
-    return;
+
+  /* give user object a chance to write its own prompt */
+  if (!(ip->iflags & HAS_WRITE_PROMPT)) {
+    tell_object(ip->ob, ip->prompt, strlen(ip->prompt));
+  }
+#ifdef OLD_ED
+  else if (ip->ed_buffer) {
+    tell_object(ip->ob, ip->prompt, strlen(ip->prompt));
+  }
+#endif
+  else if (!apply(APPLY_WRITE_PROMPT, ip->ob, 0, ORIGIN_DRIVER)) {
+    ip->iflags &= ~HAS_WRITE_PROMPT;
+    tell_object(ip->ob, ip->prompt, strlen(ip->prompt));
   }
   // Stavros: A lot of clients use this TELNET_GA to differentiate
   // prompts from other text
-  if ((ip->iflags & USING_TELNET) && !(ip->iflags & SUPPRESS_GA)) {
-    telnet_iac(ip->telnet, TELNET_GA);
+  if (ip->telnet && (ip->iflags & USING_TELNET) && !(ip->iflags & SUPPRESS_GA)) {
+    telnet_send_ga(ip->telnet);
   }
 } /* print_prompt() */
 
@@ -1494,7 +1489,8 @@ static void receive_snoop(const char *buf, int len, object_t *snooper) {
     memcpy(str, buf, len);
     str[len] = 0;
     push_malloced_string(str);
-    apply(APPLY_RECEIVE_SNOOP, snooper, 1, ORIGIN_DRIVER);
+    set_eval(max_eval_cost);
+    safe_apply(APPLY_RECEIVE_SNOOP, snooper, 1, ORIGIN_DRIVER);
   } else {
     /* snoop output is now % in all cases */
     add_message(snooper, "%", 1);
@@ -1600,8 +1596,7 @@ object_t *query_snooping(object_t *ob) {
       return user->ob;
     }
   }
-  // TODO: change this to dfatal
-  // fatal("couldn't find snoop target.\n");
+  DEBUG_FATAL("couldn't find snoop target.\n");
   return nullptr;
 } /* query_snooping() */
 #endif
