@@ -1,2 +1,7 @@
-/build*/
+/*build*/
+.vs/
 .vscode/
+.idea/
+*.swp
+*~
+.DS_Store

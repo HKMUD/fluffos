@@ -99,7 +99,7 @@ array_t *allocate_empty_array(int n) {
   return int_allocate_empty_array(n);
 }
 
-static array_t *int_allocate_array(int n) {
+static array_t *int_allocate_array(unsigned int n) {
   array_t *p = int_allocate_empty_array(n);
 
   while (n--) {
@@ -201,7 +201,7 @@ static array_t *fix_array(array_t *p, unsigned int n) {
 
 array_t *resize_array(array_t *p, unsigned int n) {
   // it is possible that n < p->size, be careful to not upgrade the result to unsigned.
-  total_array_size += (int)((int)n - (int)p->size) * int(sizeof(svalue_t));
+  total_array_size += ((int)n - p->size) * int(sizeof(svalue_t));
   if (n) {
     ms_remove_stats(p);
     p = RESIZE_ARRAY(p, n);
@@ -1515,7 +1515,7 @@ static long alist_cmp(svalue_t *p1, svalue_t *p2) {
 static svalue_t *alist_sort(array_t *inlist) {
   long size, j, curix, parix, child1, child2, flag;
   svalue_t *sv_tab, *tmp, *table, *sv_ptr, val;
-  char *str;
+  const char *str;
 
   if (!(size = inlist->size)) {
     return (svalue_t *)nullptr;
@@ -1716,7 +1716,7 @@ array_t *intersect_array(array_t *a1, array_t *a2) {
       }
     }
   } else {
-    char *str;
+    const char *str;
 
     sv_tab = a2->item;
     for (j = 0; j < a2s; j++) {
@@ -1872,7 +1872,7 @@ array_t *union_array(array_t *a1, array_t *a2) {
       }
     }
   } else {
-    char *str;
+    const char *str;
 
     sv_tab = a2->item;
     for (j = 0; j < a2s; j++) {

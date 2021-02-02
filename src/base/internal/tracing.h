@@ -1,9 +1,5 @@
 #pragma once
 
-#define DISALLOW_COPY_AND_ASSIGN(TypeName) \
-  TypeName(const TypeName&);               \
-  void operator=(const TypeName&)
-
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -31,15 +27,17 @@ enum EventCategory {
 
 class Event {
  public:
-  Event();
+  Event(std::string_view name, EventCategory category, const char* phase,
+        std::optional<json>&& args = std::nullopt);
 
-  const unsigned long process_id;
-  const unsigned long thread_id;
+  unsigned long process_id;
+  unsigned long thread_id;
   double timestamp;
+  double duration{};
   EventCategory category = EventCategory::DEFAULT;
   const char* phase = "i";
   std::string name = "DEFAULT";
-  json args = {};
+  std::optional<json> args;
 
   inline const char* category_name() {
     switch (this->category) {
@@ -64,17 +62,27 @@ class Event {
     }
     return "Unknown";
   }
+
+ public:
+  // Move only
+  Event(Event&& other) = default;
+  Event& operator=(Event&& other) = default;
+  // The copy operations are implicitly deleted, but you can
+  // spell that out explicitly if you want:
+  Event(const Event&) = delete;
+  Event& operator=(const Event&) = delete;
 };
 
 class Tracer {
  public:
-  static void setThreadName(const std::string& name);
-  static void log(const Event& e);
-  static void counter(const std::string& name, long n);
-  static void counter(const std::string& name, const json& args = {});
-  static void logSimpleEvent(const std::string& name, const EventCategory& category);
-  static void begin(const std::string& name, const EventCategory& category, json&& args = {});
-  static void end(const std::string&, const EventCategory& category);
+  static void setThreadName(const std::string_view& name);
+  static void log(Event&& e);
+  static void counter(const std::string_view& name, long n);
+  static void counter(const std::string_view& name, std::optional<json>&& args = std::nullopt);
+  static void logSimpleEvent(const std::string_view& name, const EventCategory& category);
+  static void begin(const std::string_view& name, const EventCategory& category, json&& args);
+  static void begin(const std::string_view& name, const EventCategory& category);
+  static void end(const std::string_view&, const EventCategory& category);
 
   static inline void start(const char* file) {
     // If there is already events, flush it out first.
@@ -84,7 +92,7 @@ class Tracer {
 #ifdef _WIN32
     QueryPerformanceCounter(&basetime);
 #else
-    basetime = std::chrono::steady_clock::now();
+    basetime = std::chrono::high_resolution_clock::now();
 #endif
     filename = file;
     is_enabled = true;
@@ -94,7 +102,7 @@ class Tracer {
 
   static inline bool enabled() { return is_enabled; }
 
-  static inline auto timestamp() {
+  static inline double timestamp() {
 #ifdef _WIN32
     static LARGE_INTEGER Frequency{};
     if (Frequency.QuadPart == 0) {
@@ -108,52 +116,73 @@ class Tracer {
     elapsed *= 1000000;
     return elapsed / Frequency.QuadPart;
 #else
-    return std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - basetime)
+    return std::chrono::duration<double, std::micro>(std::chrono::high_resolution_clock::now() -
+                                                     basetime)
         .count();
 #endif
   }
 
   static void collect();
 
- private:
-  Tracer() = delete;
-  DISALLOW_COPY_AND_ASSIGN(Tracer);
-
 #ifdef _WIN32
   static LARGE_INTEGER basetime;
 #else
-  static std::chrono::steady_clock::time_point basetime;
+  static std::chrono::high_resolution_clock::time_point basetime;
 #endif
   static std::string filename;
   static bool is_enabled;
   static TraceWriter& instance();
+
+ public:
+  // Not copyable or movable
+  Tracer(const Tracer&) = delete;
+  Tracer& operator=(const Tracer&) = delete;
+  // The move operations are implicitly disabled, but you can
+  // spell that out explicitly if you want:
+  Tracer(Tracer&&) = delete;
+  Tracer& operator=(Tracer&&) = delete;
+};
+
+class ScopedTracerInner {
+ public:
+  ScopedTracerInner(const std::string& name, const EventCategory category = EventCategory::DEFAULT,
+                    json&& args = {}, double time_limit_usec = 100);
+
+  virtual ~ScopedTracerInner();
+
+ private:
+  double time_limit_usec;
+  std::unique_ptr<Event> event;
+
+ public:
+  // Not copyable or movable
+  ScopedTracerInner(const ScopedTracerInner&) = delete;
+  ScopedTracerInner& operator=(const ScopedTracerInner&) = delete;
+
+  // The move operations are implicitly disabled, but you can
+  // spell that out explicitly if you want:
+  ScopedTracerInner(ScopedTracerInner&&) = delete;
+  ScopedTracerInner& operator=(ScopedTracerInner&&) = delete;
 };
 
 class ScopedTracer {
  public:
-  explicit ScopedTracer(const std::string& name,
-                        const EventCategory category = EventCategory::DEFAULT, json&& args = {}) {
-    if (!Tracer::enabled()) {
-      is_enabled = false;
-      return;
-    }
-
-    this->_name = name;
-    this->category = category;
-
-    Tracer::begin(name, category, std::move(args));
-  }
-
-  ~ScopedTracer() {
-    if (!Tracer::enabled() || !is_enabled) return;
-
-    Tracer::end(_name, category);
-  }
+  template <typename... _Arg>
+  ScopedTracer(_Arg&&... __arg)
+      : _data(Tracer::enabled()
+                  ? std::make_optional<ScopedTracerInner>(std::forward<_Arg>(__arg)...)
+                  : std::nullopt){};
 
  private:
-  bool is_enabled = true;
-  std::string _name;
-  EventCategory category;
+  std::optional<ScopedTracerInner> _data;
 
-  DISALLOW_COPY_AND_ASSIGN(ScopedTracer);
+ public:
+  // Not copyable or movable
+  ScopedTracer(const ScopedTracer&) = delete;
+  ScopedTracer& operator=(const ScopedTracer&) = delete;
+
+  // The move operations are implicitly disabled, but you can
+  // spell that out explicitly if you want:
+  ScopedTracer(ScopedTracer&&) = delete;
+  ScopedTracer& operator=(ScopedTracer&&) = delete;
 };

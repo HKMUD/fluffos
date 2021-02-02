@@ -386,22 +386,31 @@ int print_call_out_usage(outbuffer_t *ob, int verbose) {
   if (verbose == 1) {
     outbuf_add(ob, "Call out information:\n");
     outbuf_add(ob, "---------------------\n");
-    outbuf_addv(ob, "Number of allocated call outs: %8d, %8d bytes.\n", g_callout_handle_map.size(),
-                g_callout_handle_map.size() * sizeof(pending_call_t));
-    outbuf_addv(ob, "Current handle map bucket: %d\n", g_callout_handle_map.bucket_count());
+    outbuf_addv(ob, "Number of allocated call outs: %8" PRIu64 ", %8" PRIu64 " bytes.\n",
+                g_callout_handle_map.size(), g_callout_handle_map.size() * sizeof(pending_call_t));
+    outbuf_addv(ob, "Current handle map bucket: %" PRIu64 "\n",
+                g_callout_handle_map.bucket_count());
     outbuf_addv(ob, "Current handle map load_factor: %f\n", g_callout_handle_map.load_factor());
-    outbuf_addv(ob, "Current object map bucket: %d\n", g_callout_object_handle_map.bucket_count());
+    outbuf_addv(ob, "Current object map bucket: %" PRIu64 "\n",
+                g_callout_object_handle_map.bucket_count());
     outbuf_addv(ob, "Current object map load_factor: %f\n",
                 g_callout_object_handle_map.load_factor());
-    outbuf_addv(ob, "Number of garbage entry in object map: %d\n",
+    outbuf_addv(ob, "Number of garbage entry in object map: %" PRIu64 "\n",
                 g_callout_object_handle_map.size() - g_callout_handle_map.size());
   } else {
     if (verbose != -1) {
-      outbuf_addv(ob, "call out:\t\t\t%8d %8d (load_factor %f)\n", g_callout_handle_map.size(),
-                  g_callout_handle_map.size() * sizeof(pending_call_t),
+      outbuf_addv(ob, "%-20s %8" PRIu64 " %8" PRIu64 " (load_factor %f)\n", "call out",
+                  g_callout_handle_map.size(), g_callout_handle_map.size() * sizeof(pending_call_t),
                   g_callout_handle_map.load_factor());
     }
   }
+  return g_callout_handle_map.size() *
+             (sizeof(LPC_INT) + sizeof(pending_call_t *) + sizeof(pending_call_t)) +
+         g_callout_handle_map.size() * (sizeof(object_t *) + sizeof(LPC_INT));
+}
+
+// only used in checkmemory
+int total_callout_size() {
   return g_callout_handle_map.size() * sizeof(pending_call_t);
 }
 

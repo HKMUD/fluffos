@@ -52,7 +52,7 @@ struct control_stack_t {
   short caller_type;         /* was this a locally called function? */
   short framekind;
 
-  std::string trace_id;
+  std::shared_ptr<std::string> trace_id;
 };
 
 struct function_to_call_t {
@@ -142,7 +142,7 @@ void eval_instruction(char *p);
 
 function_t *setup_inherited_frame(int);
 program_t *find_function_by_name(object_t *, const char *, int *, int *);
-char *function_name(program_t *, int);
+const char *function_name(program_t *, int);
 void remove_object_from_stack(object_t *);
 void setup_fake_frame(funptr_t *);
 void remove_fake_frame(void);

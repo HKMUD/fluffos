@@ -3,11 +3,15 @@
 #include <cctype>
 #include <string.h>
 #include <unicode/brkiter.h>
+#include <unicode/unistr.h>
+
 #include "thirdparty/utf8_decoder_dfa/decoder.h"
 #include "thirdparty/widecharwidth/widechar_width.h"
+#include "thirdparty/utfcpp/source/utf8.h"
 
 #include "base/internal/log.h"
 #include "base/internal/rc.h"
+#include "base/internal/tracing.h"
 
 // Addition by Yucong Sun
 
@@ -29,24 +33,23 @@ bool u8_validate(const uint8_t *s, size_t len) {
   return state == UTF8_ACCEPT;
 }
 
-void u8_sanitize(char *src) {
-  int total = strlen(src);
-  int32_t src_offset = 0;
-  int32_t written = 0;
-  UChar32 c = -1;
-  U8_NEXT(src, src_offset, -1, c);
-  while (c != 0) {
-    UBool isError = FALSE;
-    U8_APPEND((uint8_t *)src, written, total, c > 0 ? c : 0xfffd, isError);
-    if (isError == TRUE) break;
+std::string u8_sanitize(std::string_view src) { return utf8::replace_invalid(src); }
 
-    U8_NEXT((uint8_t *)src, src_offset, -1, c);
+namespace {
+typedef std::function<void(std::unique_ptr<icu::BreakIterator> &)> u8_char_iter_callback;
+bool u8_char_iter(const char *src, const u8_char_iter_callback &cb) {
+  static std::unique_ptr<icu::BreakIterator> brk = nullptr;
+
+  /* create an iterator for graphemes */
+  if (!brk) {
+    UErrorCode status = U_ZERO_ERROR;
+    brk.reset(icu::BreakIterator::createCharacterInstance(icu::Locale::getDefault(), status));
+    if (!U_SUCCESS(status)) {
+      return false;
+    }
   }
-}
 
-bool u8_egc_count(const char *src, size_t *count) {
   UErrorCode status = U_ZERO_ERROR;
-  size_t total = 0;
   UText text = UTEXT_INITIALIZER;
 
   utext_openUTF8(&text, src, -1, &status);
@@ -55,72 +58,114 @@ bool u8_egc_count(const char *src, size_t *count) {
     return false;
   }
 
-  /* create an iterator for graphemes */
-  std::unique_ptr<icu::BreakIterator> brk(
-      icu::BreakIterator::createCharacterInstance(icu::Locale::getDefault(), status));
-  if (!U_SUCCESS(status)) {
-    utext_close(&text);
-    return false;
-  }
+  status = U_ZERO_ERROR;
   brk->setText(&text, status);
   if (!U_SUCCESS(status)) {
     utext_close(&text);
     return false;
   }
   brk->first();
-  while (brk->next() != icu::BreakIterator::DONE) ++total;
 
-  *count = total;
+  cb(brk);
 
   utext_close(&text);
   return true;
 }
+}  // namespace
+
+bool u8_egc_count(const char *src, size_t *count) {
+  *count = 0;
+
+  return u8_char_iter(src, [&](std::unique_ptr<icu::BreakIterator> &brk) {
+    int total = 0;
+    brk->first();
+    while (brk->next() != icu::BreakIterator::DONE) ++total;
+    *count = total;
+  });
+}
+
+// Search "needle' in 'haystack', making sure it matches EGC boundary.
+int u8_egc_find(const char *haystack, size_t haystack_len, const char *needle, size_t needle_len,
+                bool reverse) {
+  int index = -1;
+
+  u8_char_iter(haystack, [=, &index](std::unique_ptr<icu::BreakIterator> &brk) {
+    bool found = false;
+    std::unique_ptr<icu::BreakIterator> brk_tmp(brk->clone());
+    if (!reverse) {
+      brk->first();
+      while (true) {
+        auto start = brk->current();
+        if ((haystack_len - start) >= needle_len && brk_tmp->isBoundary(start + needle_len)) {
+          if (memcmp(&haystack[start], needle, needle_len) == 0) {
+            found = true;
+            break;
+          }
+        }
+        if (brk->next() == icu::BreakIterator::DONE) {
+          break;
+        }
+      }
+    } else {
+      brk->last();
+      while (true) {
+        auto start = brk->current();
+        if ((haystack_len - start) >= needle_len && brk_tmp->isBoundary(start + needle_len)) {
+          if (memcmp(&haystack[start], needle, needle_len) == 0) {
+            found = true;
+            break;
+          }
+        }
+        if (brk->previous() == icu::BreakIterator::DONE) {
+          break;
+        }
+      }
+    }
+    if (!found) {
+      index = -1;
+    } else {
+      // reverse counting
+      index = 0;
+      while (brk->previous() != icu::BreakIterator::DONE) index++;
+    }
+  });
+
+  return index;
+}
 
 // Return the egc at given index of src, if it is an single code point
 UChar32 u8_egc_index_as_single_codepoint(const char *src, int32_t index) {
-  UErrorCode status = U_ZERO_ERROR;
-  int32_t pos = -1;
-  UText text = UTEXT_INITIALIZER;
-
-  utext_openUTF8(&text, src, -1, &status);
-  if (!U_SUCCESS(status)) {
-    utext_close(&text);
-    return -1;
-  }
-
-  std::unique_ptr<icu::BreakIterator> brk(
-      icu::BreakIterator::createCharacterInstance(icu::Locale::getDefault(), status));
-  if (!U_SUCCESS(status)) {
-    utext_close(&text);
-    return -1;
-  }
-
-  brk->setText(&text, status);
-  if (!U_SUCCESS(status)) {
-    utext_close(&text);
-    return -1;
-  }
-
-  pos = brk->first();
-  while (index-- > 0 && pos >= 0) {
-    pos = brk->next();
-  }
-
-  // index is end-of-string
-  if (src[pos] == 0) {
-    utext_close(&text);
-    return 0;
-  }
-
   UChar32 res = U_SENTINEL;
-  auto next_pos = brk->next();
-  if (next_pos >= 0) {
-    if (next_pos - pos <= U8_MAX_LENGTH) {
-      U8_NEXT((const uint8_t *)src, pos, -1, res);
-    }
-  }
 
-  utext_close(&text);
+  u8_char_iter(src, [&](std::unique_ptr<icu::BreakIterator> &brk) {
+    int32_t pos = -1;
+    {
+      pos = brk->first();
+      while (index-- > 0 && pos >= 0) {
+        pos = brk->next();
+      }
+    }
+
+    // out-of-bounds
+    if (pos < 0) {
+      res = -2;
+      return;
+    }
+
+    // index is end-of-string
+    if (src[pos] == 0) {
+      res = 0;
+      return;
+    }
+
+    auto next_pos = brk->next();
+    if (next_pos >= 0) {
+      if (next_pos - pos <= U8_MAX_LENGTH) {
+        U8_NEXT((const uint8_t *)src, pos, -1, res);
+      }
+    }
+  });
+
   return res;
 }
 
@@ -134,60 +179,34 @@ void u8_copy_and_replace_codepoint_at(const char *src, char *dst, int32_t index,
   U8_APPEND_UNSAFE(dst, dst_offset, c);
 
   U8_FWD_1_UNSAFE(src, src_offset);
-  strcpy((char *)dst + dst_offset, (const char *)src + src_offset);
+  strcpy(dst + dst_offset, src + src_offset);
 }
 
 // Get the byte offset to the egc index, doesn't check validity or bounds.
 int32_t u8_egc_index_to_offset(const char *src, int32_t index) {
-  UErrorCode status = U_ZERO_ERROR;
-  int32_t pos = -1;
-  UText text = UTEXT_INITIALIZER;
+  int pos = -1;
 
-  utext_openUTF8(&text, src, -1, &status);
-  if (!U_SUCCESS(status)) {
-    utext_close(&text);
-    return -1;
-  }
+  u8_char_iter(src, [&](std::unique_ptr<icu::BreakIterator> &brk) {
+    pos = brk->first();
+    while (index-- > 0 && pos >= 0) {
+      pos = brk->next();
+    }
+  });
 
-  std::unique_ptr<icu::BreakIterator> brk(
-      icu::BreakIterator::createCharacterInstance(icu::Locale::getDefault(), status));
-  if (!U_SUCCESS(status)) {
-    utext_close(&text);
-    return -1;
-  }
-
-  brk->setText(&text, status);
-  if (!U_SUCCESS(status)) {
-    utext_close(&text);
-    return -1;
-  }
-
-  pos = brk->first();
-  while (index-- > 0 && pos >= 0) {
-    pos = brk->next();
-  }
-
-  utext_close(&text);
   return pos;
 }
 
 // same as strncpy, copy up to maxlen bytes but will not copy broken characters.
 int32_t u8_strncpy(uint8_t *dest, const uint8_t *src, const int32_t maxlen) {
-  int32_t src_offset = 0;
-  int32_t written = 0;
-  while (written <= maxlen) {
-    UChar32 c = 0;
-    U8_NEXT(src, src_offset, maxlen, c);
-    if (c <= 0) break;
-    UBool isError = FALSE;
-    U8_APPEND(dest, written, maxlen, c, isError);
-    if (isError == TRUE) break;
+  auto len = u8_truncate(src, strnlen(reinterpret_cast<const char *>(src), maxlen));
+  if (len != maxlen) {
+    memset(dest + len, '\0', maxlen - len);
   }
-  return written;
+  memcpy(dest, src, len);
+  return len;
 }
 
 // From ICU 61
-#ifndef U8_TRUNCATE_IF_INCOMPLETE
 /**
  * Internal bit vector for 3-byte UTF-8 validity check, for use in U8_IS_VALID_LEAD3_AND_T1.
  * Each bit indicates whether one lead byte + first trail byte pair starts a valid sequence.
@@ -196,15 +215,19 @@ int32_t u8_strncpy(uint8_t *dest, const uint8_t *src, const int32_t maxlen) {
  * @see U8_IS_VALID_LEAD3_AND_T1
  * @internal
  */
+#ifndef U8_LEAD3_T1_BITS
 #define U8_LEAD3_T1_BITS "\x20\x30\x30\x30\x30\x30\x30\x30\x30\x30\x30\x30\x30\x10\x30\x30"
+#endif
 
 /**
  * Internal 3-byte UTF-8 validity check.
  * Non-zero if lead byte E0..EF and first trail byte 00..FF start a valid sequence.
  * @internal
  */
+#ifndef U8_IS_VALID_LEAD3_AND_T1
 #define U8_IS_VALID_LEAD3_AND_T1(lead, t1) \
   (U8_LEAD3_T1_BITS[(lead)&0xf] & (1 << ((uint8_t)(t1) >> 5)))
+#endif
 
 /**
  * Internal bit vector for 4-byte UTF-8 validity check, for use in U8_IS_VALID_LEAD4_AND_T1.
@@ -214,16 +237,19 @@ int32_t u8_strncpy(uint8_t *dest, const uint8_t *src, const int32_t maxlen) {
  * @see U8_IS_VALID_LEAD4_AND_T1
  * @internal
  */
+#ifndef U8_LEAD4_T1_BITS
 #define U8_LEAD4_T1_BITS "\x00\x00\x00\x00\x00\x00\x00\x00\x1E\x0F\x0F\x0F\x00\x00\x00\x00"
+#endif
 
 /**
  * Internal 4-byte UTF-8 validity check.
  * Non-zero if lead byte F0..F4 and first trail byte 00..FF start a valid sequence.
  * @internal
  */
+#ifndef U8_IS_VALID_LEAD4_AND_T1
 #define U8_IS_VALID_LEAD4_AND_T1(lead, t1) \
   (U8_LEAD4_T1_BITS[(uint8_t)(t1) >> 4] & (1 << ((lead)&7)))
-
+#endif
 /**
  * If the string ends with a UTF-8 byte sequence that is valid so far
  * but incomplete, then reduce the length of the string to end before
@@ -250,6 +276,7 @@ int32_t u8_strncpy(uint8_t *dest, const uint8_t *src, const int32_t maxlen) {
  * @see U8_SET_CP_START
  * @stable ICU 61
  */
+#ifndef U8_TRUNCATE_IF_INCOMPLETE
 #define U8_TRUNCATE_IF_INCOMPLETE(s, start, length)                                   \
   do {                                                                                \
     if ((length) > (start)) {                                                         \
@@ -295,6 +322,26 @@ void u8_truncate_below_width(const char *src, size_t len, size_t max_width, bool
     return;
   }
 
+  static std::unique_ptr<icu::BreakIterator> brk = nullptr, linebrk = nullptr;
+  if (!brk) {
+    UErrorCode status = U_ZERO_ERROR;
+    brk.reset(icu::BreakIterator::createCharacterInstance(icu::Locale::getDefault(), status));
+    if (!U_SUCCESS(status)) {
+      debug_message("u8_truncate_below_width: Unable to create break iterator! error %d: %s\n",
+                    status, u_errorName(status));
+      return;
+    }
+  }
+  if (!linebrk) {
+    UErrorCode status = U_ZERO_ERROR;
+    linebrk.reset(icu::BreakIterator::createLineInstance(icu::Locale::getDefault(), status));
+    if (!U_SUCCESS(status)) {
+      debug_message("u8_truncate_below_width: Unable to create break iterator! error %d: %s\n",
+                    status, u_errorName(status));
+      return;
+    }
+  }
+
   bool hardwrap = false;
 
   // length to the breakpoint
@@ -304,24 +351,6 @@ void u8_truncate_below_width(const char *src, size_t len, size_t max_width, bool
 
   UErrorCode status = U_ZERO_ERROR;
 
-  std::unique_ptr<icu::BreakIterator> brk(
-      icu::BreakIterator::createCharacterInstance(icu::Locale::getDefault(), status));
-  if (!U_SUCCESS(status)) {
-    debug_message("u8_truncate_below_width: Unable to create break iterator! error %d: %s\n",
-                  status, u_errorName(status));
-    return;
-  }
-
-  status = U_ZERO_ERROR;
-  std::unique_ptr<icu::BreakIterator> linebrk(
-      icu::BreakIterator::createLineInstance(icu::Locale::getDefault(), status));
-  if (!U_SUCCESS(status)) {
-    debug_message("u8_truncate_below_width: Unable to create break iterator! error %d: %s\n",
-                  status, u_errorName(status));
-    return;
-  }
-
-  status = U_ZERO_ERROR;
   UText text = UTEXT_INITIALIZER;
   utext_openUTF8(&text, src, len, &status);
   if (!U_SUCCESS(status)) {

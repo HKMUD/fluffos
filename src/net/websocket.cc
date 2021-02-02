@@ -15,7 +15,7 @@ enum PROTOCOL_ID {
 
 static struct lws_protocols protocols[] = {
     {"http", lws_callback_http_dummy, 0, 0, WS_HTTP},
-    {"ascii", ws_ascii_callback, sizeof(struct ws_ascii_session), 4096, WS_ASCII, NULL, 0},
+    {"ascii", ws_ascii_callback, sizeof(struct ws_ascii_session), 4096, WS_ASCII},
     {NULL, NULL, 0, 0} /* terminator */
 };
 
@@ -28,14 +28,14 @@ static const struct lws_extension extensions[] = {
 
 // modified on create.
 static struct lws_http_mount mount = {
-    /* .mount_next */ NULL,  /* linked-list "next" */
-    /* .mountpoint */ "/",   /* mountpoint URL */
-    /* .origin */ nullptr,   /* serve from dir */
-    /* .def */ "index.html", /* default filename */
-    /* .protocol */ NULL,
-    /* .cgienv */ NULL,
-    /* .extra_mimetypes */ NULL,
-    /* .interpret */ NULL,
+    /* .mount_next */ nullptr, /* linked-list "next" */
+    /* .mountpoint */ "/",     /* mountpoint URL */
+    /* .origin */ nullptr,     /* serve from dir */
+    /* .def */ "index.html",   /* default filename */
+    /* .protocol */ nullptr,
+    /* .cgienv */ nullptr,
+    /* .extra_mimetypes */ nullptr,
+    /* .interpret */ nullptr,
     /* .cgi_timeout */ 0,
     /* .cache_max_age */ 0,
     /* .auth_mask */ 0,
@@ -44,21 +44,22 @@ static struct lws_http_mount mount = {
     /* .cache_intermediaries */ 0,
     /* .origin_protocol */ LWSMPRO_FILE, /* files in a dir */
     /* .mountpoint_len */ 1,             /* char count */
-    /* .basic_auth_login_file */ NULL,
+    /* .basic_auth_login_file */ nullptr,
 };
 
+void lws_log(int severity, const char *msg) { debug(websocket, "lws:%d:%s", severity, msg); }
+
 struct lws_context *init_websocket_context(event_base *base, port_def_t *port) {
+  int logs = LLL_USER | LLL_WARN | LLL_ERR;
+
 #ifdef DEBUG
-  int logs = LLL_USER | LLL_ERR;
   logs |= LLL_WARN | LLL_NOTICE | LLL_INFO;
-
   // More debug levels
-
   /* | LLL_INFO */ /* | LLL_PARSER */ /* | LLL_HEADER */
   /* | LLL_EXT */ /* | LLL_CLIENT */  /* | LLL_LATENCY */
   /* | LLL_DEBUG */;
-  lws_set_log_level(logs, nullptr);
 #endif
+  lws_set_log_level(logs, lws_log);
 
   struct lws_context_creation_info info = {0};
   void *foreign_loops[1] = {base};
@@ -72,7 +73,6 @@ struct lws_context *init_websocket_context(event_base *base, port_def_t *port) {
   info.port = CONTEXT_PORT_NO_LISTEN_SERVER;
   info.protocols = protocols;
   info.extensions = extensions;
-  info.ws_ping_pong_interval = 30;
   info.pt_serv_buf_size = 32 * 1024;
   info.options = LWS_SERVER_OPTION_LIBEVENT | LWS_SERVER_OPTION_VALIDATE_UTF8;
   // info.options |= LWS_SERVER_OPTION_HTTP_HEADERS_SECURITY_BEST_PRACTICES_ENFORCE;

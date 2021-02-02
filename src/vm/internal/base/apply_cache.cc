@@ -3,6 +3,7 @@
 #include "vm/internal/base/apply_cache.h"
 
 #include <algorithm>
+#include <memory>
 
 #include "base/internal/tracing.h"
 #include "vm/internal/base/program.h"
@@ -10,7 +11,7 @@
 static inline void fill_lookup_table(program_t *prog);
 
 lookup_entry_s apply_cache_lookup(const char *funcname, program_t *prog) {
-  ScopedTracer _tracer("Apply Cache Lookup", EventCategory::APPLY_CACHE, {{"name", funcname}});
+  ScopedTracer _tracer("Apply Cache Lookup", EventCategory::APPLY_CACHE, json{{"name", funcname}});
 
   // All function names are shared string.
   auto key = (intptr_t)(findstring(funcname));
@@ -18,16 +19,14 @@ lookup_entry_s apply_cache_lookup(const char *funcname, program_t *prog) {
     return lookup_entry_s{nullptr};
   }
 
-  auto table = prog->apply_lookup_table;
-  if (table == nullptr) {
+  if (prog->apply_lookup_table == nullptr) {
     fill_lookup_table(prog);
-    table = prog->apply_lookup_table;
   }
 
   apply_cache_lookups++;
 
-  auto pos = table->find(key);
-  if (pos != table->end()) {
+  auto pos = prog->apply_lookup_table->find(key);
+  if (pos != prog->apply_lookup_table->end()) {
     apply_cache_hits++;
     return pos->second;
   } else {
@@ -35,8 +34,9 @@ lookup_entry_s apply_cache_lookup(const char *funcname, program_t *prog) {
   }
 }
 
-static inline void fill_lookup_table_recurse(void *table, program_t *prog, uint16_t fio,
-                                             uint16_t vio) {
+static inline void fill_lookup_table_recurse(
+    std::unique_ptr<program_t::apply_lookup_table_type> &table, program_t *prog, uint16_t fio,
+    uint16_t vio) {
   // add all defined functions
   for (int i = 0; i < prog->num_functions_defined; i++) {
     auto runtime_index = i + prog->last_inherited;
@@ -44,7 +44,6 @@ static inline void fill_lookup_table_recurse(void *table, program_t *prog, uint1
       continue;
     }
 
-    auto real_table = decltype(prog->apply_lookup_table)(table);
     auto key = (intptr_t)(prog->function_table[i].funcname);
     lookup_entry_s entry = {nullptr};
     entry.progp = prog;
@@ -52,7 +51,7 @@ static inline void fill_lookup_table_recurse(void *table, program_t *prog, uint1
     entry.function_index_offset = fio;
     entry.variable_index_offset = vio;
 
-    real_table->insert({key, entry});
+    table->insert({key, entry});
   }
 
   // add inherited functions (must go backwards)
@@ -65,11 +64,8 @@ static inline void fill_lookup_table_recurse(void *table, program_t *prog, uint1
 }
 
 static inline void fill_lookup_table(program_t *prog) {
-  auto table = prog->apply_lookup_table;
-  table = new std::remove_pointer<decltype(table)>::type();
-  prog->apply_lookup_table = table;
+  prog->apply_lookup_table = std::make_unique<program_t::apply_lookup_table_type>();
+  fill_lookup_table_recurse(prog->apply_lookup_table, prog, 0, 0);
 
-  fill_lookup_table_recurse(table, prog, 0, 0);
-
-  apply_cache_items += table->size();
+  apply_cache_items += prog->apply_lookup_table->size();
 }

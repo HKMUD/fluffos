@@ -116,7 +116,6 @@ void dump_prog(program_t *prog, FILE *f, int flags) {
     fprintf(f, "\n;;;  *** Line Number Info ***\n");
     dump_line_numbers(f, prog);
   }
-  fclose(f);
 }
 
 static const char *disassem_string(const char *str) {
@@ -163,8 +162,9 @@ static const char *pushes[] = {"string", "number", "global", "local"};
 
 static void disassemble(FILE *f, char *code, int start, int end, program_t *prog) {
   extern int num_simul_efun;
-
-  long i, j, instr, iarg, ri;
+  short instr;
+  int i, j, ri;
+  LPC_INT iarg;
   unsigned short sarg;
   unsigned short offset;
   char *pc, buff[2048];
@@ -230,7 +230,7 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
         i = EXTRACT_UCHAR(pc++);
         while (i--) {
           j = EXTRACT_UCHAR(pc++);
-          fprintf(f, "%s %ld", pushes[(j & PUSH_WHAT) >> 6], j & PUSH_MASK);
+          fprintf(f, "%s %d", pushes[(j & PUSH_WHAT) >> 6], j & PUSH_MASK);
           if (i) {
             fprintf(f, ", ");
           } else {
@@ -374,7 +374,7 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
         if (static_cast<unsigned>(iarg = EXTRACT_UCHAR(pc)) < NUM_VARS) {
           sprintf(buff, "%s", variable_name(prog, iarg));
         } else {
-          sprintf(buff, "<out of range %ld>", iarg);
+          sprintf(buff, "<out of range %" LPC_INT_FMTSTR_P ">", iarg);
         }
         pc++;
         break;
@@ -406,7 +406,8 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
         COPY_SHORT(&sarg, pc);
         offset = (pc - code) - sarg;
         pc += 2;
-        sprintf(buff, "LV%ld < %ld bbranch_when_non_zero %04x (%04x)", i, iarg, sarg, offset);
+        sprintf(buff, "LV%d < %" LPC_INT_FMTSTR_P " bbranch_when_non_zero %04x (%04x)", i, iarg,
+                sarg, offset);
         break;
       case F_LOOP_COND_LOCAL:
         i = EXTRACT_UCHAR(pc++);
@@ -414,7 +415,8 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
         COPY_SHORT(&sarg, pc);
         offset = (pc - code) - sarg;
         pc += 2;
-        sprintf(buff, "LV%ld < LV%ld bbranch_when_non_zero %04x (%04x)", i, iarg, sarg, offset);
+        sprintf(buff, "LV%d < LV%" LPC_INT_FMTSTR_P " bbranch_when_non_zero %04x (%04x)", i, iarg,
+                sarg, offset);
         break;
       case F_STRING:
         COPY_SHORT(&sarg, pc);
@@ -548,11 +550,11 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
           i = 0;
           while (pc < aptr + etable - 4) {
             COPY_SHORT(&sarg, pc);
-            fprintf(f, "\t%2ld: %04x\n", i++, addr + sarg);
+            fprintf(f, "\t%2d: %04x\n", i++, addr + sarg);
             pc += 2;
           }
           COPY_INT(&iarg, pc);
-          fprintf(f, "\tminval = %ld\n", iarg);
+          fprintf(f, "\tminval = %" LPC_INT_FMTSTR_P "\n", iarg);
           pc += 4;
         } else {
           while (pc < aptr + etable) {
@@ -581,13 +583,13 @@ static void disassemble(FILE *f, char *code, int start, int end, program_t *prog
       case F_EFUN2:
       case F_EFUN3:
         LOAD_SHORT(instr, pc);
-        sprintf(buff, "EFUN: %ld", instr);
+        sprintf(buff, "EFUN: %d", instr);
         break;
       case 0:
         fprintf(f, "*** zero opcode ***\n");
         continue;
       default:
-        fprintf(f, "*** %s (%ld) ***\n", query_instr_name(instr), instr);
+        fprintf(f, "*** %s (%d) ***\n", query_instr_name(instr), instr);
         continue;
     }
     fprintf(f, "%s %s\n", query_instr_name(instr), buff);

@@ -1,32 +1,24 @@
 //---------------------------------------------------------------------------------------
 //
 // Copyright (c) 2018, Steffen Schümann <s.schuemann@pobox.com>
-// All rights reserved.
 //
-// Redistribution and use in source and binary forms, with or without modification,
-// are permitted provided that the following conditions are met:
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 //
-// 1. Redistributions of source code must retain the above copyright notice, this
-//    list of conditions and the following disclaimer.
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
 //
-// 2. Redistributions in binary form must reproduce the above copyright notice,
-//    this list of conditions and the following disclaimer in the documentation
-//    and/or other materials provided with the distribution.
-//
-// 3. Neither the name of the copyright holder nor the names of its contributors
-//    may be used to endorse or promote products derived from this software without
-//    specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-// ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-// WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 //
 //---------------------------------------------------------------------------------------
 #include <algorithm>
@@ -274,16 +266,23 @@ class TestAllocator
 {
 public:
     using value_type = T;
-
+    using pointer = T*;
+    using const_pointer = const T*;
+    using reference = T&;
+    using const_reference = const T&;
+    using difference_type = ptrdiff_t;
+    using size_type = size_t;
     TestAllocator() noexcept {}
     template <class U>
     TestAllocator(TestAllocator<U> const&) noexcept
     {
     }
-
     value_type* allocate(std::size_t n) { return static_cast<value_type*>(::operator new(n * sizeof(value_type))); }
-
     void deallocate(value_type* p, std::size_t) noexcept { ::operator delete(p); }
+    template<class U>
+    struct rebind {
+        typedef TestAllocator<U> other;
+    };
 };
 
 template <class T, class U>
@@ -616,6 +615,17 @@ TEST_CASE("30.10.8.4.8 path compare", "[filesystem][path][fs.path.compare]")
     CHECK(fs::path("/foo/b").compare(fs::path("/foo/a")) > 0);
     CHECK(fs::path("/foo/b").compare(fs::path("/foo/b")) == 0);
     CHECK(fs::path("/foo/b").compare(fs::path("/foo/c")) < 0);
+
+#ifdef GHC_OS_WINDOWS
+    CHECK(fs::path("c:\\a\\b").compare("C:\\a\\b") == 0);
+    CHECK(fs::path("c:\\a\\b").compare("d:\\a\\b") != 0);
+    CHECK(fs::path("c:\\a\\b").compare("C:\\A\\b") != 0);
+#endif
+
+#ifdef LWG_2936_BEHAVIOUR
+    CHECK(fs::path("/a/b/").compare("/a/b/c") < 0);
+    CHECK(fs::path("/a/b/").compare("a/c") > 0);
+#endif // LWG_2936_BEHAVIOUR
 }
 
 TEST_CASE("30.10.8.4.9 path decomposition", "[filesystem][path][fs.path.decompose]")
@@ -890,6 +900,7 @@ TEST_CASE("30.10.8.4.11 path generation", "[filesystem][path][fs.path.gen]")
     CHECK(fs::path("a/b/c").lexically_relative("a/b/c/x/y") == "../..");
     CHECK(fs::path("a/b/c").lexically_relative("a/b/c") == ".");
     CHECK(fs::path("a/b").lexically_relative("c/d") == "../../a/b");
+    CHECK(fs::path("a/b").lexically_relative("a/") == "b");
     if (has_host_root_name_support()) {
         CHECK(fs::path("//host1/foo").lexically_relative("//host2.bar") == "");
     }
@@ -897,6 +908,8 @@ TEST_CASE("30.10.8.4.11 path generation", "[filesystem][path][fs.path.gen]")
     CHECK(fs::path("c:/foo").lexically_relative("/bar") == "");
     CHECK(fs::path("c:foo").lexically_relative("c:/bar") == "");
     CHECK(fs::path("foo").lexically_relative("/bar") == "");
+    CHECK(fs::path("c:/foo/bar.txt").lexically_relative("c:/foo/") == "bar.txt");
+    CHECK(fs::path("c:/foo/bar.txt").lexically_relative("C:/foo/") == "bar.txt");
 #else
     CHECK(fs::path("/foo").lexically_relative("bar") == "");
     CHECK(fs::path("foo").lexically_relative("/bar") == "");
@@ -962,7 +975,13 @@ TEST_CASE("30.10.8.5 path iterators", "[filesystem][path][fs.path.itr]")
     CHECK("/,foo," == iterateResult(fs::path("/foo/")));
     CHECK("foo,bar" == iterateResult(fs::path("foo/bar")));
     CHECK("/,foo,bar" == iterateResult(fs::path("/foo/bar")));
+#ifndef USE_STD_FS
+    // ghc::filesystem enforces redundant slashes to be reduced to one
     CHECK("/,foo,bar" == iterateResult(fs::path("///foo/bar")));
+#else
+    // typically std::filesystem keeps them
+    CHECK("///,foo,bar" == iterateResult(fs::path("///foo/bar")));
+#endif
     CHECK("/,foo,bar," == iterateResult(fs::path("/foo/bar///")));
     CHECK("foo,.,bar,..," == iterateResult(fs::path("foo/.///bar/../")));
 #ifdef GHC_OS_WINDOWS
@@ -979,7 +998,13 @@ TEST_CASE("30.10.8.5 path iterators", "[filesystem][path][fs.path.itr]")
     CHECK(",foo,/" == reverseIterateResult(fs::path("/foo/")));
     CHECK("bar,foo" == reverseIterateResult(fs::path("foo/bar")));
     CHECK("bar,foo,/" == reverseIterateResult(fs::path("/foo/bar")));
+#ifndef USE_STD_FS
+    // ghc::filesystem enforces redundant slashes to be reduced to one
     CHECK("bar,foo,/" == reverseIterateResult(fs::path("///foo/bar")));
+#else
+    // typically std::filesystem keeps them
+    CHECK("bar,foo,///" == reverseIterateResult(fs::path("///foo/bar")));
+#endif
     CHECK(",bar,foo,/" == reverseIterateResult(fs::path("/foo/bar///")));
     CHECK(",..,bar,.,foo" == reverseIterateResult(fs::path("foo/.///bar/../")));
 #ifdef GHC_OS_WINDOWS
@@ -1236,9 +1261,11 @@ TEST_CASE("30.10.12 class directory_entry", "[filesystem][directory_entry][fs.di
     ec.clear();
     CHECK(std::abs(std::chrono::duration_cast<std::chrono::seconds>(de.last_write_time(ec) - now).count()) < 3);
     CHECK(!ec);
+#ifndef GHC_OS_WEB
     CHECK(de.hard_link_count() == 1);
     CHECK(de.hard_link_count(ec) == 1);
     CHECK(!ec);
+#endif
     CHECK_THROWS_AS(de.replace_filename("bar"), fs::filesystem_error);
     CHECK_NOTHROW(de.replace_filename("foo"));
     ec.clear();
@@ -1246,9 +1273,11 @@ TEST_CASE("30.10.12 class directory_entry", "[filesystem][directory_entry][fs.di
     CHECK(ec);
     auto de2none = fs::directory_entry();
     ec.clear();
+#ifndef GHC_OS_WEB
     CHECK(de2none.hard_link_count(ec) == static_cast<uintmax_t>(-1));
     CHECK_THROWS_AS(de2none.hard_link_count(), fs::filesystem_error);
     CHECK(ec);
+#endif
     ec.clear();
     CHECK_NOTHROW(de2none.last_write_time(ec));
     CHECK_THROWS_AS(de2none.last_write_time(), fs::filesystem_error);
@@ -1515,6 +1544,11 @@ TEST_CASE("30.10.15.1 absolute", "[filesystem][operations][fs.op.absolute]")
 TEST_CASE("30.10.15.2 canonical", "[filesystem][operations][fs.op.canonical]")
 {
     CHECK_THROWS_AS(fs::canonical(""), fs::filesystem_error);
+    {
+        std::error_code ec;
+        CHECK(fs::canonical("", ec) == "");
+        CHECK(ec);
+    }
     CHECK(fs::canonical(fs::current_path()) == fs::current_path());
 
     CHECK(fs::canonical(".") == fs::current_path());
@@ -1595,6 +1629,7 @@ TEST_CASE("30.10.15.3 copy", "[filesystem][operations][fs.op.copy]")
         CHECK(fs::is_symlink("dir3/dir2/file3"));
 #endif
     }
+#ifndef GHC_OS_WEB
     {
         TemporaryDirectory t(TempOpt::change_path);
         std::error_code ec;
@@ -1615,6 +1650,7 @@ TEST_CASE("30.10.15.3 copy", "[filesystem][operations][fs.op.copy]")
         CHECK(fs::exists("dir3/dir2/file3"));
         CHECK(fs::hard_link_count("dir1/dir2/file3") == f3hl + 1);
     }
+#endif
 }
 
 TEST_CASE("30.10.15.4 copy_file", "[filesystem][operations][fs.op.copy_file]")
@@ -1677,6 +1713,7 @@ TEST_CASE("30.10.15.6 create_directories", "[filesystem][operations][fs.op.creat
     CHECK(fs::create_directories(p2));
     CHECK(fs::is_directory(p));
     CHECK(fs::is_directory(p2));
+    CHECK(!fs::create_directories(p2));
 #ifdef TEST_LWG_2935_BEHAVIOUR
     INFO("This test expects LWG #2935 result conformance.");
     p = t.path() / "testfile";
@@ -1781,6 +1818,7 @@ TEST_CASE("30.10.15.8 create_directory_symlink", "[filesystem][operations][fs.op
 
 TEST_CASE("30.10.15.9 create_hard_link", "[filesystem][operations][fs.op.create_hard_link]")
 {
+#ifndef GHC_OS_WEB
     TemporaryDirectory t(TempOpt::change_path);
     std::error_code ec;
     generateFile("foo", 1234);
@@ -1794,6 +1832,7 @@ TEST_CASE("30.10.15.9 create_hard_link", "[filesystem][operations][fs.op.create_
     CHECK_THROWS_AS(fs::create_hard_link("nofoo", "bar"), fs::filesystem_error);
     CHECK_NOTHROW(fs::create_hard_link("nofoo", "bar", ec));
     CHECK(ec);
+#endif
 }
 
 TEST_CASE("30.10.15.10 create_symlink", "[filesystem][operations][fs.op.create_symlink]")
@@ -1902,6 +1941,11 @@ TEST_CASE("30.10.15.13 exists", "[filesystem][operations][fs.op.exists]")
     ec = std::error_code(42, std::system_category());
     CHECK(fs::exists(t.path(), ec));
     CHECK(!ec);
+#if defined(GHC_OS_WINDOWS) && !defined(GHC_FILESYSTEM_FWD)
+    if (::GetFileAttributesW(L"C:\\fs-test") != INVALID_FILE_ATTRIBUTES) {
+        CHECK(fs::exists("C:\\fs-test"));    
+    }
+#endif
 }
 
 TEST_CASE("30.10.15.14 file_size", "[filesystem][operations][fs.op.file_size]")
@@ -1928,6 +1972,7 @@ TEST_CASE("30.10.15.14 file_size", "[filesystem][operations][fs.op.file_size]")
 
 TEST_CASE("30.10.15.15 hard_link_count", "[filesystem][operations][fs.op.hard_link_count]")
 {
+#ifndef GHC_OS_WEB
     TemporaryDirectory t(TempOpt::change_path);
     std::error_code ec;
 #ifdef GHC_OS_WINDOWS
@@ -1953,6 +1998,9 @@ TEST_CASE("30.10.15.15 hard_link_count", "[filesystem][operations][fs.op.hard_li
     CHECK_NOTHROW(fs::hard_link_count(t.path() / "bar", ec));
     CHECK(ec);
     ec.clear();
+#else
+    WARN("Test for unsupportet features are disabled on JS/Wasm target.");
+#endif
 }
 
 class FileTypeMixFixture
@@ -1969,7 +2017,7 @@ public:
             fs::create_symlink("regular", "file_symlink");
             fs::create_directory_symlink("directory", "dir_symlink");
         }
-#ifndef GHC_OS_WINDOWS
+#if !defined(GHC_OS_WINDOWS) && !defined(GHC_OS_WEB)
         REQUIRE(::mkfifo("fifo", 0644) == 0);
         _hasFifo = true;
         struct ::sockaddr_un addr;
@@ -2272,6 +2320,7 @@ TEST_CASE_METHOD(FileTypeMixFixture, "30.10.15.24 is_symlink", "[filesystem][ope
     CHECK(!fs::is_symlink(fs::file_status(fs::file_type::unknown)));
 }
 
+#ifndef GHC_OS_WEB
 static fs::file_time_type timeFromString(const std::string& str)
 {
     struct ::tm tm;
@@ -2283,6 +2332,7 @@ static fs::file_time_type timeFromString(const std::string& str)
     }
     return from_time_t<fs::file_time_type>(std::mktime(&tm));
 }
+#endif
 
 TEST_CASE("30.10.15.25 last_write_time", "[filesystem][operations][fs.op.last_write_time]")
 {
@@ -2305,6 +2355,7 @@ TEST_CASE("30.10.15.25 last_write_time", "[filesystem][operations][fs.op.last_wr
         // checks that the time of the symlink is fetched
         CHECK(ft == fs::last_write_time("foo2"));
     }
+#ifndef GHC_OS_WEB
     auto nt = timeFromString("2015-10-21T04:30:00");
     CHECK_NOTHROW(fs::last_write_time(t.path() / "foo", nt));
     CHECK(std::abs(std::chrono::duration_cast<std::chrono::seconds>(fs::last_write_time("foo") - nt).count()) < 1);
@@ -2315,6 +2366,7 @@ TEST_CASE("30.10.15.25 last_write_time", "[filesystem][operations][fs.op.last_wr
     CHECK_THROWS_AS(fs::last_write_time("bar", nt), fs::filesystem_error);
     CHECK_NOTHROW(fs::last_write_time("bar", nt, ec));
     CHECK(ec);
+#endif
 }
 
 TEST_CASE("30.10.15.26 permissions", "[filesystem][operations][fs.op.permissions]")
@@ -2500,6 +2552,7 @@ TEST_CASE("30.10.15.34 space", "[filesystem][operations][fs.op.space]")
         CHECK(si.free >= si.available);
         CHECK(!ec);
     }
+#ifndef GHC_OS_WEB // statvfs under emscripten always returns a result, so this tests would fail
     {
         std::error_code ec;
         fs::space_info si;
@@ -2510,6 +2563,7 @@ TEST_CASE("30.10.15.34 space", "[filesystem][operations][fs.op.space]")
         CHECK(ec);
     }
     CHECK_THROWS_AS(fs::space("foobar42"), fs::filesystem_error);
+#endif
 }
 
 TEST_CASE("30.10.15.35 status", "[filesystem][operations][fs.op.status]")
@@ -2629,13 +2683,28 @@ TEST_CASE("30.10.15.39 weakly_canonical", "[filesystem][operations][fs.op.weakly
 TEST_CASE("std::string_view support", "[filesystem][fs.string_view]")
 {
 #if __cpp_lib_string_view
-    std::string p("foo/bar");
-    std::string_view sv(p);
-    CHECK(fs::path(sv, fs::path::format::generic_format).generic_string() == "foo/bar");
-    fs::path p2("fo");
-    p2 += std::string_view("o");
-    CHECK(p2 == "foo");
-    CHECK(p2.compare(std::string_view("foo")) == 0);
+    {
+        std::string p("foo/bar");
+        std::string_view sv(p);
+        CHECK(fs::path(sv, fs::path::format::generic_format).generic_string() == "foo/bar");
+        fs::path p2("fo");
+        p2 += std::string_view("o");
+        CHECK(p2 == "foo");
+        CHECK(p2.compare(std::string_view("foo")) == 0);
+    }
+
+#if defined(IS_WCHAR_PATH) || defined(GHC_USE_WCHAR_T)
+    {
+        std::wstring p(L"foo/bar");
+        std::wstring_view sv(p);
+        CHECK(fs::path(sv, fs::path::format::generic_format).generic_string() == "foo/bar");
+        fs::path p2(L"fo");
+        p2 += std::wstring_view(L"o");
+        CHECK(p2 == "foo");
+        CHECK(p2.compare(std::wstring_view(L"foo")) == 0);
+    }
+#endif
+
 #else
     WARN("std::string_view specific tests are empty without std::string_view.");
 #endif
@@ -2665,33 +2734,54 @@ TEST_CASE("Windows: Long filename support", "[filesystem][path][fs.path.win.long
 #endif
 }
 
-TEST_CASE("Windows: UNC path support", "[filesystem][path][fs.path.win.unc]")
+TEST_CASE("Windows: path namespace handling", "[filesystem][path][fs.path.win.namespaces]")
 {
 #ifdef GHC_OS_WINDOWS
-    std::error_code ec;
-    fs::path p(R"(\\localhost\c$\Windows)");
-    auto symstat = fs::symlink_status(p, ec);
-    CHECK(!ec);
-    auto p2 = fs::canonical(p, ec);
-    CHECK(!ec);
-    CHECK(p2 == p);
-
-    std::vector<fs::path> variants = {
-        R"(C:\Windows\notepad.exe)",
-        R"(\\.\C:\Windows\notepad.exe)",
-        R"(\\?\C:\Windows\notepad.exe)",
-        R"(\??\C:\Windows\notepad.exe)",
-        R"(\\?\HarddiskVolume1\Windows\notepad.exe)",
-        R"(\\?\Harddisk0Partition1\Windows\notepad.exe)",
-        R"(\\.\GLOBALROOT\Device\HarddiskVolume1\Windows\notepad.exe)",
-        R"(\\?\GLOBALROOT\Device\Harddisk0\Partition1\Windows\notepad.exe)",
-        R"(\\?\Volume{e8a4a89d-0000-0000-0000-100000000000}\Windows\notepad.exe)",
-        R"(\\LOCALHOST\C$\Windows\notepad.exe)",
-        R"(\\?\UNC\C$\Windows\notepad.exe)",
-        R"(\\?\GLOBALROOT\Device\Mup\C$\Windows\notepad.exe)",
+    {
+        std::error_code ec;
+        fs::path p(R"(\\localhost\c$\Windows)");
+        auto symstat = fs::symlink_status(p, ec);
+        CHECK(!ec);
+        auto p2 = fs::canonical(p, ec);
+        CHECK(!ec);
+        CHECK(p2 == p);
+    }
+    
+    struct TestInfo
+    {
+        std::string _path;
+        std::string _string;
+        std::string _rootName;
+        std::string _rootPath;
+        std::string _iterateResult;
     };
-    for (auto pt : variants) {
-        std::cerr << pt.string() << " - " << pt.root_name() << ", " << pt.root_path() << ": " << iterateResult(pt) << std::endl;
+    std::vector<TestInfo> variants = {
+        {R"(C:\Windows\notepad.exe)", R"(C:\Windows\notepad.exe)", "C:", "C:\\", "C:,/,Windows,notepad.exe"},
+#ifdef USE_STD_FS
+        {R"(\\?\C:\Windows\notepad.exe)", R"(\\?\C:\Windows\notepad.exe)", "\\\\?", "\\\\?\\", "//?,/,C:,Windows,notepad.exe"},
+        {R"(\??\C:\Windows\notepad.exe)", R"(\??\C:\Windows\notepad.exe)", "\\??", "\\??\\", "/??,/,C:,Windows,notepad.exe"},
+#else
+        {R"(\\?\C:\Windows\notepad.exe)", R"(C:\Windows\notepad.exe)", "C:", "C:\\", "C:,/,Windows,notepad.exe"},
+        {R"(\??\C:\Windows\notepad.exe)", R"(C:\Windows\notepad.exe)", "C:", "C:\\", "C:,/,Windows,notepad.exe"},
+#endif
+        {R"(\\.\C:\Windows\notepad.exe)", R"(\\.\C:\Windows\notepad.exe)", "\\\\.", "\\\\.\\", "//.,/,C:,Windows,notepad.exe"},
+        {R"(\\?\HarddiskVolume1\Windows\notepad.exe)", R"(\\?\HarddiskVolume1\Windows\notepad.exe)", "\\\\?", "\\\\?\\", "//?,/,HarddiskVolume1,Windows,notepad.exe"},
+        {R"(\\?\Harddisk0Partition1\Windows\notepad.exe)", R"(\\?\Harddisk0Partition1\Windows\notepad.exe)", "\\\\?", "\\\\?\\", "//?,/,Harddisk0Partition1,Windows,notepad.exe"},
+        {R"(\\.\GLOBALROOT\Device\HarddiskVolume1\Windows\notepad.exe)", R"(\\.\GLOBALROOT\Device\HarddiskVolume1\Windows\notepad.exe)", "\\\\.", "\\\\.\\", "//.,/,GLOBALROOT,Device,HarddiskVolume1,Windows,notepad.exe"},
+        {R"(\\?\GLOBALROOT\Device\Harddisk0\Partition1\Windows\notepad.exe)", R"(\\?\GLOBALROOT\Device\Harddisk0\Partition1\Windows\notepad.exe)", "\\\\?", "\\\\?\\", "//?,/,GLOBALROOT,Device,Harddisk0,Partition1,Windows,notepad.exe"},
+        {R"(\\?\Volume{e8a4a89d-0000-0000-0000-100000000000}\Windows\notepad.exe)", R"(\\?\Volume{e8a4a89d-0000-0000-0000-100000000000}\Windows\notepad.exe)", "\\\\?", "\\\\?\\", "//?,/,Volume{e8a4a89d-0000-0000-0000-100000000000},Windows,notepad.exe"},
+        {R"(\\LOCALHOST\C$\Windows\notepad.exe)", R"(\\LOCALHOST\C$\Windows\notepad.exe)", "\\\\LOCALHOST", "\\\\LOCALHOST\\", "//LOCALHOST,/,C$,Windows,notepad.exe"},
+        {R"(\\?\UNC\C$\Windows\notepad.exe)", R"(\\?\UNC\C$\Windows\notepad.exe)", "\\\\?", "\\\\?\\", "//?,/,UNC,C$,Windows,notepad.exe"},
+        {R"(\\?\GLOBALROOT\Device\Mup\C$\Windows\notepad.exe)", R"(\\?\GLOBALROOT\Device\Mup\C$\Windows\notepad.exe)", "\\\\?", "\\\\?\\", "//?,/,GLOBALROOT,Device,Mup,C$,Windows,notepad.exe"},
+    };
+
+    for (auto ti : variants) {
+        INFO("Used path: " + ti._path);
+        auto p = fs::path(ti._path);
+        CHECK(p.string() == ti._string);
+        CHECK(p.root_name().string() == ti._rootName);
+        CHECK(p.root_path().string() == ti._rootPath);
+        CHECK(iterateResult(p) == ti._iterateResult);
     }
 #else
     WARN("Windows specific tests are empty on non-Windows systems.");

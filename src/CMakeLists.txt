@@ -9,7 +9,7 @@ option(PACKAGE_ARITH_OPERATOR "arith_operator package" ON)
 option(PACKAGE_ASYNC "async package" ON)
 option(PACKAGE_CHINESE "chinese package" ON)
 option(PACKAGE_COMPRESS "compress package" ON)
-option(PACKAGE_CONTRIB "compress package" ON)
+option(PACKAGE_CONTRIB "contrib package" ON)
 # PACKAGE CORE should always be on
 set(PACKAGE_CORE ON)
 option(PACKAGE_CRYPTO "crypto package" ON)
@@ -32,7 +32,8 @@ option(PACKAGE_SHA1 "sha1 package" ON)
 option(PACKAGE_SOCKETS "sockets package" ON)
 option(PACKAGE_TRIM "trim package" ON)
 option(PACKAGE_UIDS "uids package" ON)
-option(DEBUG ON)
+option(PACKAGE_EXTERNAL "external package" OFF)
+option(DEBUG OFF)
 option(DEBUGMALLOC ${DEBUG})
 # End of list of compile options.
 
@@ -56,7 +57,7 @@ set(CMAKE_ENABLE_EXPORTS ON)
 
 if (${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU" OR ${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQUAL "AppleClang")
   foreach (lang C CXX)
-    set(CMAKE_${lang}_FLAGS_DEBUG "-O1 -g3")
+    set(CMAKE_${lang}_FLAGS_DEBUG "-O0 -g3")
     # include (minimal) debug information even for RELEASE build.
     set(CMAKE_${lang}_FLAGS_RELEASE "-O3 -DNDEBUG -g")
     set(CMAKE_${lang}_FLAGS_RELWITHDEBINFO "${CMAKE_${lang}_FLAGS_RELEASE}")
@@ -180,10 +181,14 @@ endif ()
 
 add_subdirectory(thirdparty/filesystem EXCLUDE_FROM_ALL)
 include_directories(thirdparty/filesystem/include)
+add_subdirectory(thirdparty/fmt EXCLUDE_FROM_ALL)
+include_directories(thirdparty/fmt/include)
 
+set(DISABLE_WERROR ON CACHE BOOL "" FORCE)
 set(LWS_WITH_SHARED OFF CACHE BOOL "" FORCE)
 set(LWS_WITHOUT_TESTAPPS ON CACHE BOOL "" FORCE)
 set(LWS_IPV6 ON CACHE BOOL "" FORCE)
+set(LWS_WITHOUT_EXTENSIONS OFF CACHE BOOL "" FORCE)
 set(LWS_WITH_LIBEVENT ON CACHE BOOL "" FORCE)
 set(LWS_STATIC_PIC ON CACHE BOOL "" FORCE)
 set(LWS_WITH_DIR OFF CACHE BOOL "" FORCE)
@@ -195,6 +200,7 @@ set(LWS_WITHOUT_TEST_PING ON CACHE BOOL "" FORCE)
 set(LWS_WITHOUT_TEST_CLIENT ON CACHE BOOL "" FORCE)
 set(LWS_WITH_LEJP OFF CACHE BOOL "" FORCE)
 set(LWS_WITH_LEJP_CONF OFF CACHE BOOL "" FORCE)
+set(LWS_UNIX_SOCK OFF CACHE BOOL "" FORCE)
 add_subdirectory(thirdparty/libwebsockets EXCLUDE_FROM_ALL)
 include_directories("thirdparty/libwebsockets/include" SYSTEM)
 include_directories("${CMAKE_CURRENT_BINARY_DIR}/thirdparty/libwebsockets")
@@ -259,7 +265,7 @@ set(GENERATRED_SOURCE
 add_custom_command(
   OUTPUT "applies_table.autogen.cc" "applies_table.autogen.h"
   COMMAND "build_applies" "${CMAKE_CURRENT_SOURCE_DIR}"
-  DEPENDS "vm/internal/applies"
+  DEPENDS "vm/internal/applies" "build_applies"
 )
 
 add_custom_command(
@@ -392,6 +398,7 @@ endif ()
 # end of JEMALLOC
 
 target_link_libraries(libdriver PUBLIC ghc_filesystem)
+target_link_libraries(libdriver PRIVATE fmt::fmt-header-only)
 
 target_link_libraries(libdriver PUBLIC autogen)
 
@@ -404,7 +411,7 @@ foreach (PACKAGE ${FLUFFOS_PACKAGES})
 endforeach ()
 
 add_subdirectory(thirdparty/crypt)
-target_link_libraries(libdriver PUBLIC crypt)
+target_link_libraries(libdriver PRIVATE crypt)
 
 target_link_libraries(libdriver PUBLIC ${LIBWEBSOCKETS_LIBRARIES_STATIC})
 # Third party libraries
